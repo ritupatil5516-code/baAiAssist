@@ -1,0 +1,30 @@
+# Banking Copilot v2.0.0 - Domain Glossary
+merchant: >
+  The name of the store, vendor, or service provider where the transaction occurred.
+  Examples: Amazon, Starbucks, Delta Airlines.
+
+amount: >
+  The monetary value of the transaction, in USD. Positive amounts represent charges
+  to the account, while negative amounts represent credits or payments.
+
+category: >
+  A label that groups transactions by type of spending or activity.
+  Examples: Groceries, Travel, Dining, Utilities, Electronics, Entertainment, Fuel,
+  Loan Payment, Interest Charges.
+
+type: >
+  The classification of the transaction:
+    - PURCHASE: A regular retail or online purchase
+    - PAYMENT: A payment made toward the account balance
+    - INTEREST: Interest fees charged on the account
+    - INSTALLMENT: Scheduled partial payment for a larger purchase
+
+date: >
+  The date the transaction was posted to the account. Usually in YYYY-MM-DD format.
+
+id: >
+  A unique identifier for each transaction in the system.
+
+notes: >
+  Optional free-text notes or descriptions added to a transaction, such as order IDs,
+  invoice references, or internal remarks.

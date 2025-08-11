@@ -1,35 +1,79 @@
-import json
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
+
+import os, json, faiss, numpy as np, subprocess
+from openai import OpenAI
 from scripts.query_rewriter import rewrite_query
 from utils.field_chunker import transaction_to_text
+from pathlib import Path
 
-DATA_PATH = "data/transactions.json"
-INDEX_PATH = "data/index/transactions_faiss_index_flat.faiss"
-GLOSSARY_PATH = "data/domain_glossary.yaml"
-EMBED_MODEL = "BAAI/bge-small-en"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+INDEX_PATH   = PROJECT_ROOT / "data" / "index" / "transactions_faiss_index_flat.faiss"
+DATA_PATH    = PROJECT_ROOT / "data" / "transactions.json"
+GLOSSARY_PATH= PROJECT_ROOT / "data" / "domain_glossary.yaml"
+
+CHAT_MODEL  = os.getenv("CHAT_MODEL",  "meta-llama/Llama-3.3-70B-Instruct")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-en-icl")
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
+                base_url=os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE"))
+
+def _ensure_index():
+    if os.path.exists(INDEX_PATH):
+        return
+    os.makedirs(os.path.dirname(INDEX_PATH), exist_ok=True)
+    print("FAISS index not found. Building via scripts/build_faiss_index.py ...")
+    subprocess.check_call(["python", "scripts/build_faiss_index.py"])
+
+def _embed(texts: list[str]) -> np.ndarray:
+    vecs = []
+    for i in range(0, len(texts), 64):
+        resp = client.embeddings.create(model=EMBED_MODEL, input=texts[i:i+64])
+        vecs.extend([d.embedding for d in resp.data])
+    V = np.array(vecs, dtype="float32")
+    V /= (np.linalg.norm(V, axis=1, keepdims=True) + 1e-8)
+    return V
 
 class BankingCopilotAgent:
-    def __init__(self):
-        self.model = SentenceTransformer(EMBED_MODEL)
-        self.index = faiss.read_index(INDEX_PATH)
-        with open(DATA_PATH, "r") as f:
+    def __init__(self, top_k: int = 8):
+        _ensure_index()
+        if not os.path.exists(DATA_PATH):
+            raise FileNotFoundError(DATA_PATH)
+        with open(DATA_PATH, "r", encoding="utf-8") as f:
             self.transactions = json.load(f)
-        with open(GLOSSARY_PATH, "r") as f:
-            self.glossary = f.read()
+        self.index = faiss.read_index(INDEX_PATH)
+        self.top_k = top_k
+        if os.path.exists(GLOSSARY_PATH):
+            with open(GLOSSARY_PATH, "r", encoding="utf-8") as f:
+                self.glossary = f.read()
+        else:
+            self.glossary = ""
 
-    def search(self, query, top_k=5):
-        query = rewrite_query(query)
-        emb = self.model.encode([query], convert_to_numpy=True)
-        D, I = self.index.search(emb, top_k)
-        results = [self.transactions[i] for i in I[0] if i != -1]
-        return results
+    def search(self, user_query: str):
+        rewritten = rewrite_query(user_query)
+        qv = _embed([rewritten])
+        sims, idxs = self.index.search(qv, self.top_k)
+        hits = [self.transactions[i] for i in idxs[0] if i != -1]
+        return hits, rewritten
 
-    def answer(self, query):
-        results = self.search(query)
-        context = "\n".join(transaction_to_text(txn) for txn in results)
-        prompt = f"Glossary:\n{self.glossary}\n\nTransactions:\n{context}\n\nQuestion: {query}\nAnswer:"
-        # Here you would call your LLaMA/OpenAI model, e.g.:
-        # return llama_chat(prompt)
-        return prompt  # For now, just returns prompt for testing
+    def answer(self, user_query: str) -> str:
+        results, rewritten = self.search(user_query)
+        context = "\n".join(transaction_to_text(t) for t in results)
+        system_prompt = (
+            "You are a banking assistant. Answer ONLY using the provided transactions and glossary. "
+            "If the data is insufficient, say: 'Information not available in the provided data.'"
+        )
+        user_prompt = (
+            f"Glossary:\n{self.glossary}\n\n"
+            f"Retrieved transactions (top {self.top_k}):\n{context}\n\n"
+            f"Original question: {user_query}\n"
+            f"Rewritten for retrieval: {rewritten}\n\n"
+            "Return a concise answer in natural language."
+        )
+        resp = client.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0
+        )
+        return resp.choices[0].message["content"].strip()

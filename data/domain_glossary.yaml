@@ -1,30 +1,128 @@
-# Banking Copilot v2.0.0 - Domain Glossary
-merchant: >
-  The name of the store, vendor, or service provider where the transaction occurred.
-  Examples: Amazon, Starbucks, Delta Airlines.
+# This file is injected into every prompt. Keep it concise and canonical.
 
-amount: >
-  The monetary value of the transaction, in USD. Positive amounts represent charges
-  to the account, while negative amounts represent credits or payments.
+schema_version: "2025-08-11"
 
-category: >
-  A label that groups transactions by type of spending or activity.
-  Examples: Groceries, Travel, Dining, Utilities, Electronics, Entertainment, Fuel,
-  Loan Payment, Interest Charges.
+fields:
+  transactionId:
+    desc: Unique ID for the transaction event.
+  accountId:
+    desc: Internal account identifier.
+  personId:
+    desc: Internal person/customer identifier.
+  transactionType:
+    desc: >
+      Business classification of the event.
+      Common values:
+        - PURCHASE: retail/merchant charge
+        - PAYMENT: payment made to reduce balance
+        - INTEREST: periodic interest charged
+        - INSTALLMENT: scheduled charge as part of a financed purchase
+  transactionStatus:
+    desc: Posting status. Usually "POSTED" (final); "PENDING" means not final.
+  amount:
+    desc: >
+      Absolute, positive amount in currency units. Direction is NOT encoded here.
+      Use debitCreditIndicator to infer sign.
+  debitCreditIndicator:
+    desc: >
+      Direction of the transaction relative to account balance:
+        "1"   → increases balance (charges: PURCHASE/INTEREST/INSTALLMENT)
+        "-1"  → decreases balance (credits: PAYMENT/refunds)
+      When computing totals, use signedAmount = amount * int(debitCreditIndicator).
+  transactionDateTime:
+    desc: ISO-8601 timestamp the item posted (UTC). Use date portion for month filters.
+  currencyCode:
+    desc: ISO-4217 currency (e.g., USD).
+  displayTransactionType:
+    desc: Human-readable label for UI; may mirror transactionType (e.g., "interest_charged").
+  merchantId:
+    desc: Internal/partner merchant identifier (may be synthetic).
+  merchantName:
+    desc: Merchant display name (e.g., "Amazon", "Starbucks").
+  merchantCategoryName:
+    desc: >
+      Category derived from merchant/type (e.g., GROCERY, DINING, TRAVEL, ELECTRONICS,
+      ENTERTAINMENT, FUEL, PAYMENT, OTHER, INSTALLMENT).
+  isMerchantCredit:
+    desc: Flag for merchant-initiated credits; usually false for charges.
+  cardType:
+    desc: Instrument type (DIGITAL, DEBIT, CREDIT).
+  transactionCode:
+    desc: Internal posting/clearing code.
+  isInstallmentConversionEligible:
+    desc: Whether this charge could be converted to installments (eligibility only).
+  lastFourDigits:
+    desc: Last 4 digits of the payment instrument.
+  isRecurring:
+    desc: True if this pattern repeats (subscriptions, installments, interest).
 
-type: >
-  The classification of the transaction:
-    - PURCHASE: A regular retail or online purchase
-    - PAYMENT: A payment made toward the account balance
-    - INTEREST: Interest fees charged on the account
-    - INSTALLMENT: Scheduled partial payment for a larger purchase
+derived_fields:
+  signedAmount:
+    formula: amount * int(debitCreditIndicator)
+    desc: >
+      Use this for math. Positive = charge (adds to balance). Negative = payment/credit (reduces).
+  postingDate:
+    formula: transactionDateTime[0:10]
+    desc: YYYY-MM-DD (UTC date).
+  postingMonth:
+    formula: transactionDateTime[0:7]
+    desc: YYYY-MM (month bucket).
 
-date: >
-  The date the transaction was posted to the account. Usually in YYYY-MM-DD format.
+guidance:
+  calculations:
+    - "Totals must use derived signedAmount (NOT raw amount)."
+    - "INTEREST totals: filter transactionType == 'INTEREST'."
+    - "Installments list/total: filter transactionType == 'INSTALLMENT'."
+    - "Payments total: filter transactionType == 'PAYMENT' and sum signedAmount (will be negative)."
+    - "For 'over $X' filters, compare absolute amount unless user explicitly means net."
+  date_filters:
+    - "'last N months' means inclusive range from today minus N×30 days to today."
+    - "Month queries (e.g., 'August 2025') match postingMonth == '2025-08'."
+  precedence:
+    - "When transactionType and displayTransactionType differ, prefer transactionType for logic."
+    - "If merchantName is blank, still use transactionType and category for classification."
+  missing_data:
+    - "If the requested fact cannot be derived from provided transactions, say: 'Information not available in the provided data.' Do not invent."
+  examples:
+    - query: "Total INTEREST amount in August 2025"
+      rule: filter transactionType == INTEREST and postingMonth == 2025-08; sum signedAmount.
+    - query: "Count PURCHASES over $200 last month"
+      rule: filter transactionType == PURCHASE and amount > 200 within last-month range; count rows.
+    - query: "List all installment transactions in 2024"
+      rule: filter transactionType == INSTALLMENT and postingDate between 2024-01-01..2024-12-31; return rows.
+    - query: "What is my total payment this year?"
+      rule: filter transactionType == PAYMENT for current year; sum signedAmount (result will be negative; report absolute with note).
 
-id: >
-  A unique identifier for each transaction in the system.
+enums:
+  transactionType: [PURCHASE, PAYMENT, INTEREST, INSTALLMENT]
+  transactionStatus: [POSTED, PENDING]
+  cardType: [DIGITAL, DEBIT, CREDIT]
+  merchantCategoryName:
+    - GROCERY
+    - DINING
+    - TRAVEL
+    - ELECTRONICS
+    - ENTERTAINMENT
+    - FUEL
+    - HOME_IMPROVEMENT
+    - PAYMENT
+    - INSTALLMENT
+    - OTHER
 
-notes: >
-  Optional free-text notes or descriptions added to a transaction, such as order IDs,
-  invoice references, or internal remarks.
+aliases:
+  # Map common user terms → canonical fields/types to help interpretation
+  interest: INTEREST
+  interest_charge: INTEREST
+  installment: INSTALLMENT
+  installments: INSTALLMENT
+  purchases: PURCHASE
+  payment: PAYMENT
+  payments: PAYMENT
+  month: postingMonth
+  date: postingDate
+
+llm_notes:
+  - "Use the glossary definitions and derived_fields when reasoning."
+  - "Prefer exact field filters over fuzzy language when possible."
+  - "When summarizing totals, mention the filter (type/date/threshold) you applied."
+  - "Cite the number of matched transactions when answering numeric questions."

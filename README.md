@@ -1,58 +1,25 @@
-# 🏦 Banking Copilot v2.0.0
+# 🏦 Banking Copilot v2.0.0 (FAISS Flat, OpenAI-Compatible)
 
-A production-ready **banking AI copilot** that answers questions about transactions using **context engineering + FAISS semantic search** — no GPU fine-tuning required.
+- FAISS Flat (exact cosine) retrieval
+- OpenAI-compatible embeddings: `BAAI/bge-en-icl`
+- LLM via `CHAT_MODEL` (e.g., `meta-llama/Llama-3.3-70B-Instruct`)
+- Field-aware chunking, query rewriting, glossary injection
+- Streamlit chat UI + auto-build index when missing
 
----
-
-## 🚀 Features
-- **Synthetic dataset** (~200 realistic transactions)
-- **Domain glossary injection** for better banking-specific answers
-- **FAISS Flat vector search** with field-aware chunking
-- **Query rewriting** for date ranges and amounts
-- **Calculation tool** for aggregations (e.g., total spend)
-- **Multi-step reasoning agent**
-- **Streamlit chat UI** with session history
-- **Prebuilt FAISS index** for instant startup
-
----
-
-## 📂 Project Structure
-
-banking_copilot_v2.0.0/
-├── README.md
-├── requirements.txt
-├── streamlit_app.py
-├── data/
-│   ├── transactions.json
-│   ├── domain_glossary.yaml
-│   └── index/
-│       └── transactions_faiss_index_flat.faiss
-├── scripts/
-│   ├── generate_dataset.py
-│   ├── build_faiss_index.py
-│   ├── query_rewriter.py
-│   ├── calc_tool.py
-│   └── agent.py
-└── utils/
-└── field_chunker.py
-
----
-
-## 🛠️ Setup & Run
-
-### 1️⃣ Install dependencies
+## Quickstart
 ```bash
 pip install -r requirements.txt
 
----
+export OPENAI_BASE_URL="http://localhost:8000/v1"
+export OPENAI_API_KEY="your_key"
+export CHAT_MODEL="meta-llama/Llama-3.3-70B-Instruct"
+export EMBED_MODEL="BAAI/bge-en-icl"
 
-## 🛠️ Setup & Run
+# (optional) generate new dataset
+python scripts/generate_dataset.py
 
-### 1️⃣ Install dependencies
-```bash
-pip install -r requirements.txt
-
+# build index (the app will auto-build if missing)
+python scripts/build_faiss_index.py
 
 streamlit run streamlit_app.py
-
-
+```
